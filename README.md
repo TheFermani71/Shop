@@ -1,4 +1,4 @@
-# Uber
+# Shop
 Shop is a project developed for the Parallel and Distributed Programming exam. It consists of a set of APIs implemented with the fastapi lib in Python and follows the SAGA design pattern.
 
 ## Requirements
@@ -8,8 +8,10 @@ For running the project you just have to copy and paste the following command li
 # Check if "fastapi" is downloaded in your virtual environment or inside your global environment.
 pip3 install fastapi pika sqlalchemy uvicorn pydantic;
 
-# Run docker with rabbitmq with the following command or open the docker desktop and use it to run rabbitmq.
+# Run docker with rabbitmq with the following commands.
 docker run rabbitmq;
+docker run rabbitmq:management;
+docker run -d --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:management;
 
 
 # Run in development mode, now you have 3 microservices up: 
