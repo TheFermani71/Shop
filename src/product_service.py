@@ -44,3 +44,15 @@ def list_products():
                 "price": p.price
             } for p in products
         ]
+
+
+# New route: Get product by ID
+@router.get("/products/{product_id}")
+def get_product_by_id(product_id: int):
+    with SessionLocal() as db:
+        product = db.query(Product).filter(Product.id == product_id).first()
+        
+        if not product:
+            raise HTTPException(status_code=404, detail=f"Product with ID {product_id} not found!")
+        
+        return to_string(product)
