@@ -1,0 +1,7 @@
+1. Chiedere se va bene utilizzare un db locale.
+
+TODO:
+ - Delete a product. FATTTO!! (when you'll try to delet a product that is inside a order, the system'll tell you that is inside a order!!)
+ - Delete an order.  FATTTO!
+ - Add quantity of existing product. FATTO!
+ - Get product by id. FATTO !
