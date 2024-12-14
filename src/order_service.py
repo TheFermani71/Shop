@@ -3,7 +3,7 @@ from fastapi import FastAPI
 
 from saga_manager import publish_message, consume_message
 from database import SessionLocal, init_db
-from models import Order
+from models import Order, Product
 
 import threading
 
@@ -66,6 +66,22 @@ def handle_refund_event(message):
 @router.post("/orders")
 def create_order(order: OrderRequest):
     with SessionLocal() as db:
+        # Fetch the product
+        product = db.query(Product).filter(Product.id == order.product_id).first()
+        
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found!")
+        
+        # Check if enough quantity is available
+        if product.quantity < order.quantity:
+            raise HTTPException(status_code=400, detail="Not enough product quantity available!")
+
+        # Decrease the product quantity
+        product.quantity -= order.quantity
+        db.commit()  # Commit the product quantity update first
+
+
+        # Create a new order
         new_order = Order(product_id=order.product_id, quantity=order.quantity, status="created")
         db.add(new_order)
         db.commit()
@@ -74,7 +90,7 @@ def create_order(order: OrderRequest):
         # Publish order_created event
         publish_message(ORDER_QUEUE, {"event": "order_created", "order_id": new_order.id})
 
-    return {"message": f"Order with id -> {new_order.id} created."}
+    return {"message": f"Order with id -> {new_order.id} created. Product quantity updated."}
 
 
 @router.get("/orders")

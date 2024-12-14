@@ -2,4 +2,4 @@ TODO:
  - Get product by id. FATTO!
  - Delete an order with relative payment and increment the quantity of the product again.
  - Implement a order_refund.
- - Decrease the quantity of a product after the order creation.
+ - Decrease the quantity of a product after the order creation. FATTO!
