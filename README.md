@@ -1,18 +1,28 @@
 # Uber
-Uber is a project developed for the Parallel and Distributed Programming exam. It consists of a set of APIs implemented with the fastapi lib in Python and follows the Actor Model design pattern.
+Shop is a project developed for the Parallel and Distributed Programming exam. It consists of a set of APIs implemented with the fastapi lib in Python and follows the SAGA design pattern.
 
-## Fast API
-For running the fastapi APIs you just have to copy and paste the folliwing command line.
+## Requirements
+For running the project you just have to copy and paste the following command line.
 
 ```bash
 # Check if "fastapi" is downloaded in your virtual environment or inside your global environment.
-pip3 install fastapi
+pip3 install fastapi pika sqlalchemy uvicorn pydantic;
 
-# Lib used to run fastapi command from the terminal.
-pip3 install "fastapi[standard]"
+# Run docker with rabbitmq with the following command or open the docker desktop and use it to run rabbitmq.
+docker run rabbitmq;
 
-fastapi dev main.py # Run in development mode, go to "http://127.0.0.1:8000/docs" to see all the APIs.
+
+# Run in development mode, now you have 3 microservices up: 
+# - product   -> "http://127.0.0.1:8000/docs" to see all the products APIs.
+# - order     -> "http://127.0.0.1:8001/docs" to see all the orders APIs.
+# - payment   -> "http://127.0.0.1:8002/docs" to see all the payments APIs.
+chmod +x run.sh;
+./run.sh;
+
+# Otherwise you can run three different command for each terminal or all in one.
+uvicorn product_service:router --reload --port=8000 &
+uvicorn order_service:router --reload --port=8001 &
+uvicorn payment_service:router --reload --port=8002 & wait;
 ```
 
-## Actor Model
-If you want to check the documentation about the Actor Model design pattern and how it is working, you can check the python library  [The Spian](https://thespianpy.com/doc/) that we used.
+## SAGA
