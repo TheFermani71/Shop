@@ -1,9 +1,9 @@
 from pydantic import BaseModel
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from saga_manager import publish_message, consume_message
 from database import SessionLocal, init_db
-from models import Order, Product
+from models import Order, Product, Payment
 
 import threading
 
@@ -91,6 +91,36 @@ def create_order(order: OrderRequest):
         publish_message(ORDER_QUEUE, {"event": "order_created", "order_id": new_order.id})
 
     return {"message": f"Order with id -> {new_order.id} created. Product quantity updated."}
+
+
+@router.delete("/orders/{order_id}")
+def delete_order(order_id: int):
+    with SessionLocal() as db:
+        # Fetch the order
+        order = db.query(Order).filter(Order.id == order_id).first()
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found!")
+
+        # Fetch the associated product
+        product = db.query(Product).filter(Product.id == order.product_id).first()
+        if not product:
+            raise HTTPException(status_code=404, detail="Associated product not found!")
+
+        # Increment the product quantity back
+        product.quantity += order.quantity
+
+        # Delete the associated payment if it exists
+        payment = db.query(Payment).filter(Payment.order_id == order_id).first()
+        if payment:
+            db.delete(payment)
+
+        # Delete the order
+        db.delete(order)
+
+        # Commit all changes in a single transaction
+        db.commit()
+
+    return {"message": f"Order {order_id} deleted, payment removed, and product quantity restored."}
 
 
 @router.get("/orders")
