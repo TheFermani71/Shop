@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from saga_manager import publish_message, consume_message
+from saga_manager import consume_message, publish_message
 from models import Payment, User, Order, Product
 from database import SessionLocal, init_db
 
@@ -10,7 +10,7 @@ import threading
 router = FastAPI()
 
 PAYMENT_QUEUE = "payment_queue"
-COMPENSATION_QUEUE = "compensation_queue"
+ORDER_QUEUE = 'order_queue'
 
 
 @router.on_event("startup")
@@ -36,27 +36,16 @@ def process_payment(message):
         if status == "order_approved":
             print(f"Processing payment with order_id -> {order_id}.")
 
-            try:
-                total_payment = product.price * order.quantity
+            total_payment = product.price * order.quantity
 
-                if user.wallet < total_payment:
-                    raise Exception("Not enough money in the user wallet!")
+            if user.wallet < total_payment:
+                return publish_message(PAYMENT_QUEUE, {"order_id": order_id, "status": "payment_refused"})
 
-                # Decrease the money quantity.
-                user.wallet -= total_payment
+            user.wallet -= total_payment
+            payment.status = "success"
 
-                payment.status = "success"
-                print(f"Processing payment with order_id: {order_id} -> {payment.status}.\n"
-                      f"User with id -> {user.id}, spent {total_payment}, now he has {user.wallet}.")
-
-            except Exception as e:
-                payment.status = "failed"
-                print(f"Payment with order_id: {order_id} -> {payment.status}.")
-                # publish_message(COMPENSATION_QUEUE, {"order_id": order_id, "status": "order_failed"})
-
-        elif status == "order_failed":
-            payment.status = "failed"
-            print(f"Order with id: {order_id} -> {payment.status}. No payment required.")
+            print(f"Processing payment with order_id: {order_id} -> {payment.status}.\n"
+                  f"User with id -> {user.id}, spent {total_payment}, now he has {user.wallet}.")
 
         elif status == 'order_refund':
             total_to_refund = product.price * order.quantity
@@ -67,6 +56,11 @@ def process_payment(message):
             payment.status = "refund"
             print(f"Order with id: {order_id} -> {payment.status}, user refunded.")
 
+        elif status == 'payment_refused':
+            payment.status = "refused"
+            print(f"Order with id: {order_id} -> {payment.status}, not enough money.")
+            return publish_message(ORDER_QUEUE, {"order_id": order_id, "status": "order_failed"})
+
         db.commit()
 
 
@@ -76,6 +70,6 @@ def get_payment_status(order_id: int):
         payment = db.query(Payment).filter(Payment.order_id == order_id).first()
 
         if not payment:
-            return {"order_id": order_id, "status": "Payment not found!"}
+            return {"order_id": order_id, "status": f"Payment not found for the order_id -> {order_id}!"}
 
         return {"order_id": order_id, "status": payment.status}
