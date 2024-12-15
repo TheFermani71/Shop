@@ -1,9 +1,9 @@
-from pydantic import BaseModel
 from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
 from saga_manager import publish_message, consume_message
 from database import SessionLocal, init_db
-from models import Order, Product, Payment
+from models import Order, Product
 
 import threading
 
@@ -17,11 +17,13 @@ PAYMENT_QUEUE = "payment_queue"
 # Pydantic schema
 class OrderRequest(BaseModel):
     product_id: int
+    user_id: int
     quantity: int
 
 
 def process_order(message):
     order_id = message["order_id"]
+    status = message['status']
 
     with SessionLocal() as db:
         order = db.query(Order).filter(Order.id == order_id).first()
@@ -29,12 +31,12 @@ def process_order(message):
         if not order:
             return
 
+        if status != 'order_created':
+            return
+
         try:
             # Simulate order processing
             print(f"Processing order with id -> {order_id}.")
-
-            # if order_id % 2 == 0:  # Simulate failure for even orders
-            #     raise Exception("Order validation failed.")
 
             order.status = "approved"
             publish_message(PAYMENT_QUEUE, {"order_id": order_id, "status": "order_approved"})
@@ -46,21 +48,6 @@ def process_order(message):
         finally:
             print(f"Order with id: {order_id} -> {order.status}!")
             db.commit()
-
-
-'''
-def handle_refund_event(message):
-    if message.get("event") == "RefundEvent":
-        order_id = message["order_id"]
-
-        with SessionLocal() as db:
-            order = db.query(Order).filter(Order.order_id == order_id).first()
-
-            if order:
-                order.status = "canceled"
-                db.commit()
-                print(f"Order {order_id} canceled due to refund.")
-'''
 
 
 @router.post("/orders")
@@ -76,19 +63,18 @@ def create_order(order: OrderRequest):
         if product.quantity < order.quantity:
             raise HTTPException(status_code=400, detail="Not enough product quantity available!")
 
-        # Decrease the product quantity
+        # Decrease the product quantity.
         product.quantity -= order.quantity
-        db.commit()  # Commit the product quantity update first
-
 
         # Create a new order
-        new_order = Order(product_id=order.product_id, quantity=order.quantity, status="created")
+        new_order = Order(product_id=order.product_id, user_id=order.user_id, quantity=order.quantity, status="created")
         db.add(new_order)
         db.commit()
+
         db.refresh(new_order)
 
         # Publish order_created event
-        publish_message(ORDER_QUEUE, {"event": "order_created", "order_id": new_order.id})
+        publish_message(ORDER_QUEUE, {"status": "order_created", "order_id": new_order.id})
 
     return {"message": f"Order with id -> {new_order.id} created. Product quantity updated."}
 
@@ -103,24 +89,20 @@ def delete_order(order_id: int):
 
         # Fetch the associated product
         product = db.query(Product).filter(Product.id == order.product_id).first()
-        if not product:
-            raise HTTPException(status_code=404, detail="Associated product not found!")
 
         # Increment the product quantity back
         product.quantity += order.quantity
 
         # Delete the associated payment if it exists
-        payment = db.query(Payment).filter(Payment.order_id == order_id).first()
-        if payment:
-            db.delete(payment)
+        publish_message(PAYMENT_QUEUE, {"order_id": order.id, "status": "order_refund"})
 
-        # Delete the order
-        db.delete(order)
+        # Marked order as cancelled.
+        order.status = 'cancelled'
 
         # Commit all changes in a single transaction
         db.commit()
 
-    return {"message": f"Order {order_id} deleted, payment removed, and product quantity restored."}
+    return {"message": f"Order {order_id} deleted, payment refunded, and product quantity restored."}
 
 
 @router.get("/orders")
@@ -131,6 +113,7 @@ def list_orders():
             {
                 "id": o.id,
                 "product_id": o.product_id,
+                "user_id": o.user_id,
                 "quantity": o.quantity,
                 "status": o.status
             } for o in orders
