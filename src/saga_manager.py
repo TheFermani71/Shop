@@ -15,7 +15,7 @@ def publish_message(queue, message):
         exchange='',
         routing_key=queue,
         body=json.dumps(message),
-        properties=pika.BasicProperties(delivery_mode=2)  # Make message persistent
+        properties=pika.BasicProperties(delivery_mode=2)
     )
     connection.close()
 
@@ -24,9 +24,7 @@ def consume_message(queue, callback):
     connection = pika.BlockingConnection(pika.URLParameters(RABBITMQ_URL))
     channel = connection.channel()
 
-    channel.queue_declare(queue=queue, durable=True)
-
-    def wrapper(ch, method, properties, body):
+    def wrapper(ch, method, _, body):
         message = json.loads(body)
         callback(message)
         ch.basic_ack(delivery_tag=method.delivery_tag)

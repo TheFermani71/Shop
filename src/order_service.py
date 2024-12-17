@@ -28,62 +28,62 @@ def process_order(message):
     with SessionLocal() as db:
         order = db.query(Order).filter(Order.id == order_id).first()
 
+        # Fetch the product.
+        product = db.query(Product).filter(Product.id == order.product_id).first()
+
         if not order:
             return
 
         if status == 'order_created':
-            # Fetch the product
             print(f"Processing order with id -> {order_id}.")
-            product = db.query(Product).filter(Product.id == order.product_id).first()
 
+            # If product not present inside the db we call the event "order_failed".
             if not product:
                 return publish_message(ORDER_QUEUE, {"order_id": order_id, "status": "order_failed"})
 
-            # Check if enough quantity is available
+            # Check if enough quantity is available otherwise call the event "order_not_enough".
             if product.quantity < order.quantity:
-                return publish_message(ORDER_QUEUE, {"order_id": order_id, "status": "order_p_enough"})
+                return publish_message(ORDER_QUEUE, {"order_id": order_id, "status": "order_not_enough"})
 
+            publish_message(PAYMENT_QUEUE, {"order_id": order_id, "status": "payment_processing"})
+
+        elif status == "order_approved":
+            product.quantity -= order.quantity
             order.status = "approved"
 
-            # Decrease the product quantity.
-            product.quantity -= order.quantity
-            publish_message(PAYMENT_QUEUE, {"order_id": order_id, "status": "order_approved"})
-
         elif status == 'order_failed':
-            print('Product not found or some problems with the payment!')
+            print('Product not found!')
             order.status = 'failed'
 
-        elif status == 'order_p_enough':
+        elif status == 'order_not_enough':
             print('Product quantity not enough!')
             order.status = 'failed'
 
         elif status == 'order_cancelled':
-            product = db.query(Product).filter(Product.id == order.product_id).first()
-
             # Increment the product quantity back.
             product.quantity += order.quantity
 
-            # Delete the associated payment if it exists.
-            publish_message(PAYMENT_QUEUE, {"order_id": order.id, "status": "order_refund"})
-
             # Marked order as cancelled.
             order.status = 'cancelled'
+
+            # Delete the associated payment if it exists.
+            publish_message(PAYMENT_QUEUE, {"order_id": order.id, "status": "payment_refund"})
 
         print(f"Order with id: {order_id} -> {order.status}!")
         db.commit()
 
 
-@router.post("/orders")
+@router.post("/orders/add")
 def create_order(order: OrderRequest):
     with SessionLocal() as db:
-        # Create a new order
+        # Create a new order.
         new_order = Order(product_id=order.product_id, user_id=order.user_id, quantity=order.quantity, status="created")
         db.add(new_order)
         db.commit()
         db.refresh(new_order)
 
-        # Publish order_created event
-        publish_message(ORDER_QUEUE, {"status": "order_created", "order_id": new_order.id})
+        # Publish event "order_created" inside the "order_queue".
+        publish_message(ORDER_QUEUE, {"order_id": new_order.id, "status": "order_created"})
 
     return {"message": f"Order with id -> {new_order.id} created."}
 
@@ -96,10 +96,13 @@ def delete_order(order_id: int):
         if not order:
             raise HTTPException(status_code=404, detail="Order not found!")
 
-        # Delete the associated payment if it exists
+        if order.status != 'approved':
+            raise HTTPException(status_code=400, detail="You can delete only an 'approved' order!")
+
+        # Delete the associated order and relative payment if exists.
         publish_message(ORDER_QUEUE, {"order_id": order.id, "status": "order_cancelled"})
 
-    return {"message": f"Order with id -> {order_id} deleted."}
+    return {"message": f"Processing deletion of order with id -> {order_id}."}
 
 
 @router.get("/orders")

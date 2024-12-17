@@ -33,7 +33,7 @@ def process_payment(message):
             payment = Payment(order_id=order_id, status="processing")
             db.add(payment)
 
-        if status == "order_approved":
+        if status == "payment_processing":
             print(f"Processing payment with order_id -> {order_id}.")
 
             total_payment = product.price * order.quantity
@@ -46,20 +46,21 @@ def process_payment(message):
 
             print(f"Processing payment with order_id: {order_id} -> {payment.status}.\n"
                   f"User with id -> {user.id}, spent {total_payment}, now he has {user.wallet}.")
+            publish_message(ORDER_QUEUE, {"order_id": order_id, "status": "order_approved"})
 
-        elif status == 'order_refund':
+        elif status == 'payment_refund':
             total_to_refund = product.price * order.quantity
 
-            # Refund the money.
+            # Refund the money to the user.
             user.wallet += total_to_refund
-
             payment.status = "refund"
+
             print(f"Order with id: {order_id} -> {payment.status}, user refunded.")
 
         elif status == 'payment_refused':
             payment.status = "refused"
+            order.status = "failed"
             print(f"Order with id: {order_id} -> {payment.status}, not enough money.")
-            return publish_message(ORDER_QUEUE, {"order_id": order_id, "status": "order_failed"})
 
         db.commit()
 
