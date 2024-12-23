@@ -1,4 +1,4 @@
-# Uber
+# Shop
 Shop is a project developed for the Parallel and Distributed Programming exam. It consists of a set of APIs implemented with the fastapi lib in Python and follows the SAGA design pattern.
 
 ## Requirements
