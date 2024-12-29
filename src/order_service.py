@@ -69,6 +69,10 @@ def process_order(message):
             # Delete the associated payment if it exists.
             publish_message(PAYMENT_QUEUE, {"order_id": order.id, "status": "payment_refund"})
 
+        elif status == 'order_retry':
+            print('Some error happened, retry in few minutes!')
+            order.status = 'error'
+
         print(f"Order with id: {order_id} -> {order.status}!")
         db.commit()
 
@@ -78,9 +82,18 @@ def create_order(order: OrderRequest):
     with SessionLocal() as db:
         # Create a new order.
         new_order = Order(product_id=order.product_id, user_id=order.user_id, quantity=order.quantity, status="created")
-        db.add(new_order)
-        db.commit()
-        db.refresh(new_order)
+
+        # try - catch implemented to catch error so we can do the rollback and publish the event -> "order_retry".
+        try:
+            db.add(new_order)
+
+        except Exception:
+            db.rollback()
+            raise publish_message(ORDER_QUEUE, {"order_id": new_order.id, "status": "order_retry"})
+
+        else:
+            db.commit()
+            db.refresh(new_order)
 
         # Publish event "order_created" inside the "order_queue".
         publish_message(ORDER_QUEUE, {"order_id": new_order.id, "status": "order_created"})
