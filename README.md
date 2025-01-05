@@ -8,8 +8,10 @@ For running the project you just have to copy and paste the following command li
 # Check if "fastapi" is downloaded in your virtual environment or inside your global environment.
 pip3 install fastapi pika sqlalchemy uvicorn pydantic;
 
-# Run docker with rabbitmq with the following command or open the docker desktop and use it to run rabbitmq.
+# Run docker with rabbitmq with the following commands.
 docker run rabbitmq;
+docker run rabbitmq:management;
+docker run -d --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:management;
 
 
 # Run in development mode, now you have 3 microservices up: 
@@ -24,4 +26,3 @@ uvicorn product_service:router --reload --port=8000 &
 uvicorn order_service:router --reload --port=8001 &
 uvicorn payment_service:router --reload --port=8002 & wait;
 ```
-

@@ -1,9 +1,9 @@
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from fastapi import FastAPI
 
 from saga_manager import publish_message, consume_message
 from database import SessionLocal, init_db
-from models import Order
+from models import Order, Product
 
 import threading
 
@@ -17,64 +17,105 @@ PAYMENT_QUEUE = "payment_queue"
 # Pydantic schema
 class OrderRequest(BaseModel):
     product_id: int
+    user_id: int
     quantity: int
 
 
 def process_order(message):
     order_id = message["order_id"]
+    status = message['status']
 
     with SessionLocal() as db:
         order = db.query(Order).filter(Order.id == order_id).first()
 
+        # Fetch the product.
+        product = db.query(Product).filter(Product.id == order.product_id).first()
+
         if not order:
             return
 
-        try:
-            # Simulate order processing
+        if status == 'order_created':
             print(f"Processing order with id -> {order_id}.")
 
-            # if order_id % 2 == 0:  # Simulate failure for even orders
-            #     raise Exception("Order validation failed.")
+            # If product not present inside the db we call the event "order_failed".
+            if not product:
+                return publish_message(ORDER_QUEUE, {"order_id": order_id, "status": "order_failed"})
 
+            # Check if enough quantity is available otherwise call the event "order_not_enough".
+            if product.quantity < order.quantity:
+                return publish_message(ORDER_QUEUE, {"order_id": order_id, "status": "order_not_enough"})
+
+            publish_message(PAYMENT_QUEUE, {"order_id": order_id, "status": "payment_processing"})
+
+        elif status == "order_approved":
+            product.quantity -= order.quantity
             order.status = "approved"
-            publish_message(PAYMENT_QUEUE, {"order_id": order_id, "status": "order_approved"})
 
-        except Exception as e:
-            order.status = "failed"
-            publish_message(PAYMENT_QUEUE, {"order_id": order_id, "status": "order_failed"})
+        elif status == 'order_failed':
+            print('Product not found!')
+            order.status = 'failed'
 
-        finally:
-            print(f"Order with id: {order_id} -> {order.status}!")
-            db.commit()
+        elif status == 'order_not_enough':
+            print('Product quantity not enough!')
+            order.status = 'failed'
+
+        elif status == 'order_cancelled':
+            # Increment the product quantity back.
+            product.quantity += order.quantity
+
+            # Marked order as cancelled.
+            order.status = 'cancelled'
+
+            # Delete the associated payment if it exists.
+            publish_message(PAYMENT_QUEUE, {"order_id": order.id, "status": "payment_refund"})
+
+        elif status == 'order_retry':
+            print('Some error happened, retry in few minutes!')
+            order.status = 'error'
+
+        print(f"Order with id: {order_id} -> {order.status}!")
+        db.commit()
 
 
-'''
-def handle_refund_event(message):
-    if message.get("event") == "RefundEvent":
-        order_id = message["order_id"]
-
-        with SessionLocal() as db:
-            order = db.query(Order).filter(Order.order_id == order_id).first()
-
-            if order:
-                order.status = "canceled"
-                db.commit()
-                print(f"Order {order_id} canceled due to refund.")
-'''
-
-
-@router.post("/orders")
+@router.post("/orders/add")
 def create_order(order: OrderRequest):
     with SessionLocal() as db:
-        new_order = Order(product_id=order.product_id, quantity=order.quantity, status="created")
-        db.add(new_order)
-        db.commit()
-        db.refresh(new_order)
+        # Create a new order.
+        new_order = Order(product_id=order.product_id, user_id=order.user_id, quantity=order.quantity, status="created")
 
-        # Publish order_created event
-        publish_message(ORDER_QUEUE, {"event": "order_created", "order_id": new_order.id})
+        # try - catch implemented to catch error so we can do the rollback and publish the event -> "order_retry".
+        try:
+            db.add(new_order)
+
+        except Exception:
+            db.rollback()
+            raise publish_message(ORDER_QUEUE, {"order_id": new_order.id, "status": "order_retry"})
+
+        else:
+            db.commit()
+            db.refresh(new_order)
+
+        # Publish event "order_created" inside the "order_queue".
+        publish_message(ORDER_QUEUE, {"order_id": new_order.id, "status": "order_created"})
 
     return {"message": f"Order with id -> {new_order.id} created."}
+
+
+@router.delete("/orders/{order_id}")
+def delete_order(order_id: int):
+    with SessionLocal() as db:
+        order = db.query(Order).filter(Order.id == order_id).first()
+
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found!")
+
+        if order.status != 'approved':
+            raise HTTPException(status_code=400, detail="You can delete only an 'approved' order!")
+
+        # Delete the associated order and relative payment if exists.
+        publish_message(ORDER_QUEUE, {"order_id": order.id, "status": "order_cancelled"})
+
+    return {"message": f"Processing deletion of order with id -> {order_id}."}
 
 
 @router.get("/orders")
@@ -85,6 +126,7 @@ def list_orders():
             {
                 "id": o.id,
                 "product_id": o.product_id,
+                "user_id": o.user_id,
                 "quantity": o.quantity,
                 "status": o.status
             } for o in orders
