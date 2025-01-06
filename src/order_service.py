@@ -6,6 +6,7 @@ from database import SessionLocal, init_db
 from models import Order, Product
 
 import threading
+import random
 
 
 router = FastAPI()
@@ -28,11 +29,12 @@ def process_order(message):
     with SessionLocal() as db:
         order = db.query(Order).filter(Order.id == order_id).first()
 
+        if not order:
+            print('Order not found!')
+            return
+
         # Fetch the product.
         product = db.query(Product).filter(Product.id == order.product_id).first()
-
-        if not order:
-            return
 
         if status == 'order_created':
             print(f"Processing order with id -> {order_id}.")
@@ -87,9 +89,14 @@ def create_order(order: OrderRequest):
         try:
             db.add(new_order)
 
-        except Exception:
+            # Generate a random number, if modulo 3 equal 0 we throw the exception.
+            if random.randint(1, 10) % 3 == 0:
+                print(0 / 0)
+
+        except ZeroDivisionError:
             db.rollback()
-            raise publish_message(ORDER_QUEUE, {"order_id": new_order.id, "status": "order_retry"})
+            publish_message(ORDER_QUEUE, {"order_id": new_order.id, "status": "order_retry"})
+            return {"message": f"Order error!"}
 
         else:
             db.commit()
